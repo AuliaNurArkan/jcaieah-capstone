@@ -311,5 +311,3 @@ Masukkan pilihan: ''')
             break
         else:
             print("Pilihan tidak valid. Coba lagi.")
-
-# test
