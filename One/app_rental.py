@@ -3,6 +3,7 @@ import mysql.connector
 import matplotlib.pyplot as plt
 import seaborn as sns
 import time
+from datetime import datetime
 
 # ===========================
 # KONFIGURASI DATABASE
@@ -258,7 +259,163 @@ def menghapus_data():
     conn.close()
 
 # ===========================
-# 6. Export seluruh tabel ke CSV
+# 6. Edit Data
+# ===========================
+def edit_data():
+    print("\n=== Edit Data Rental ===")
+
+    # 1) Validasi input rental_id (harus angka)
+    while True:
+        rid = input("Masukkan rental_id yang ingin diedit: ").strip()
+        if rid.isdigit():
+            rental_id = int(rid)
+            break
+        else:
+            print("Input tidak valid. Masukkan angka (rental_id).")
+
+    # 2) Ambil data lama lalu tampilkan
+    conn = get_conn()
+    cur = conn.cursor()
+    df_row = pd.read_sql(f"SELECT * FROM {TABLE} WHERE rental_id = {rental_id}", conn)
+    if df_row.empty:
+        print(f"Data dengan rental_id = {rental_id} tidak ditemukan.")
+        cur.close()
+        conn.close()
+        return
+
+    # memastikan rental_id tampil sebagai integer
+    if 'rental_id' in df_row.columns:
+        df_row['rental_id'] = df_row['rental_id'].astype('Int64')
+
+    print("\nData saat ini:")
+    print(df_row.to_string(index=False))
+
+    # 3) Menanyakan kolom mana yang ingin diubah (masukkan input baru atau Enter untuk tetap dengan niai lama)
+    #    User bisa mengubah sebagian data saja
+    print("\nMasukkan nilai baru untuk tiap kolom (tekan Enter untuk mempertahankan nilai lama).")
+    current = df_row.iloc[0].to_dict()
+
+    # car_type (string)
+    new_car_type = input(f"Jenis mobil [{current.get('car_type', '')}]: ").strip()
+
+    # rental_duration (int >= 1) 
+    while True:
+        new_rental_duration = input(f"Durasi sewa (hari) [{current.get('rental_duration', '')}]: ").strip()
+        if new_rental_duration == "":
+            break  # pertahankan
+        if new_rental_duration.isdigit() and int(new_rental_duration) >= 1:
+            new_rental_duration = int(new_rental_duration)
+            break
+        else:
+            print("Input tidak valid. Masukkan bilangan bulat >= 1 atau tekan Enter untuk mempertahankan nilai lama.")
+
+    # rental_cost (float >= 0)
+    while True:
+        new_rental_cost = input(f"Biaya sewa [{current.get('rental_cost', '')}]: ").strip()
+
+        if new_rental_cost == "":
+            break  # pertahankan nilai lama
+
+    # Koma sebagai desimal
+        new_rental_cost = new_rental_cost.replace(",", ".")
+
+    # Validasi angka float
+        tmp = new_rental_cost.replace('.', '', 1).replace('-', '', 1)
+
+        if tmp.isdigit() and not new_rental_cost.count('-'):
+            val = float(new_rental_cost)
+            if val >= 0:
+                new_rental_cost = val
+                break
+
+        print("Input tidak valid. Masukkan angka >= 0 (contoh: 250.0 atau 250,0) atau tekan Enter untuk mempertahankan nilai lama.")
+
+    # customer_gender (string)
+    new_customer_gender = input(f"Gender [{current.get('customer_gender', '')}]: ").strip()
+
+    # rental_date (valid YYYY-MM-DD)
+    while True:
+        new_rental_date = input(f"Tanggal sewa (YYYY-MM-DD) [{current.get('rental_date', '')}]: ").strip()
+        if new_rental_date == "":
+            break
+        # validasi format tanggal
+        try:
+            # datetime.strptime hanya untuk validasi format
+            datetime.strptime(new_rental_date, "%Y-%m-%d")
+            break
+        except Exception:
+            print("Format tanggal tidak valid. Gunakan format YYYY-MM-DD (contoh: 2025-12-04) atau tekan Enter untuk mempertahankan nilai lama.")
+
+    # branch_city (string)
+    new_branch_city = input(f"Kota cabang [{current.get('branch_city', '')}]: ").strip()
+
+    # 4) Menyimpan pasangan kolom beserta nilai hanya untuk field yang diubah
+    updates = {}
+    if new_car_type != "":
+        updates['car_type'] = new_car_type
+    if new_rental_duration != "":
+        updates['rental_duration'] = new_rental_duration
+    if new_rental_cost != "":
+        updates['rental_cost'] = new_rental_cost
+    if new_customer_gender != "":
+        updates['customer_gender'] = new_customer_gender
+    if new_rental_date != "":
+        updates['rental_date'] = new_rental_date
+    if new_branch_city != "":
+        updates['branch_city'] = new_branch_city
+
+    if not updates:
+        print("Tidak ada perubahan. Batal edit.")
+        cur.close()
+        conn.close()
+        return
+
+    # 5) Tampilkan perubahan dan minta konfirmasi Y/N
+    print("\nPerubahan yang akan dilakukan:")
+    for k, v in updates.items():
+        old = current.get(k, "")
+        print(f" - {k}: {old}  -->  {v}")
+
+    while True:
+        confirm = input("Konfirmasi update? (Y/N): ").strip().lower()
+        if confirm in ("y", "n"):
+            break
+        print("Masukkan Y untuk ya atau N untuk tidak.")
+
+    if confirm == "n":
+        print("Update dibatalkan oleh user.")
+        cur.close()
+        conn.close()
+        return
+
+    # 6) Query Update hanya untuk kolom yang berubah
+    set_clauses = ", ".join([f"`{col}` = %s" for col in updates.keys()])
+    values = list(updates.values())
+    values.append(rental_id)
+
+    update_sql = f"UPDATE {TABLE} SET {set_clauses} WHERE rental_id = %s"
+
+    # 7) Eksekusi update
+    cur.execute(update_sql, tuple(values))
+    conn.commit()
+
+    if cur.rowcount > 0:
+        print("Data berhasil diperbarui!")
+
+        # tampilkan baris terbaru
+        df_new = pd.read_sql(f"SELECT * FROM {TABLE} WHERE rental_id = {rental_id}", conn)
+        if 'rental_id' in df_new.columns:
+            df_new['rental_id'] = df_new['rental_id'].astype('Int64')
+        print("\nData setelah update:")
+        print(df_new.to_string(index=False))
+    else:
+        print("Tidak ada perubahan yang dilakukan (mungkin nilai sama dengan sebelumnya).")
+
+    cur.close()
+    conn.close()
+
+# ===========================
+# 7. Export seluruh tabel ke CSV
 # ===========================
 def export_to_csv():
     print("Mengekspor data ke CSV...")
@@ -289,8 +446,9 @@ if __name__ == "__main__":
 3. Visualisasi Data
 4. Menambahkan Data
 5. Menghapus Data
-6. Simpan tabel ke CSV
-7. Keluar
+6. Edit Data
+7. Simpan tabel ke CSV
+8. Keluar Program
 
 Masukkan pilihan: ''')
 
@@ -305,8 +463,10 @@ Masukkan pilihan: ''')
         elif pilihan == "5":
             menghapus_data()
         elif pilihan == "6":
-            export_to_csv()
+            edit_data()
         elif pilihan == "7":
+            export_to_csv()
+        elif pilihan == "8":
             print("Keluar program...")
             break
         else:
